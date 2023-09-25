@@ -1,6 +1,8 @@
 import axios from 'axios';
 import cron from 'node-cron';
 import { ChildCare, connectToDatabase } from './dbConnect';
+import terraformer from 'terraformer-wkt-parser'
+import fs from 'fs';
 
 
 // Init
@@ -13,7 +15,7 @@ const headers = {
 connectToDatabase();
 
 // Batch
-cron.schedule('*/2 * * * *', async () => {
+cron.schedule('0 3 * * *', async () => {
     console.log('#################################');
     console.log('###### Update Batch Start #######');
     console.log('#################################');
@@ -55,8 +57,6 @@ async function collectChildCareData() {
             nextVersion = null;
         }
     }
-
-    console.log("nextVersion : " + nextVersion)
 
     if (existingData.length === 0) {
         await collectChildCareVersions(1, latestVersionId);
@@ -129,18 +129,25 @@ async function childCareNearby() {
 
 // 멀티폴리곤
 async function multiPolygon() {
-    const multiPolygon = await ChildCare.find({
+    const filePaths = ['./multiPolygon.wkt', './multiPolygon2.wkt']
+
+    for (const filePath of filePaths) {
+        fs.readFile(filePath, 'utf8', (err, data) => {
+            const jsonData = data;
+            const geoJson = terraformer.parse(jsonData);
+            getChildCareWithinPolygon(geoJson);
+        })
+    }
+}
+
+async function getChildCareWithinPolygon(polygonData: any) {
+    const childCareData = await ChildCare.find({
         location: {
             $geoWithin: {
-                $polygon: [[127, 30], [127, 31], [127, 32]] // test
+                $geometry: polygonData
             }
         }
-    });
-    console.log(multiPolygon);
-};
-
-
-
-
-
-
+    }).exec();
+    console.log(childCareData);
+    return childCareData;
+}
