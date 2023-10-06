@@ -13,6 +13,7 @@ const childCareSchema = new mongoose.Schema({
     location: {
         type: {
             type: String,
+            enum: ['Point', 'LineString', 'Polygon', 'MultiPoint', 'MultiLineString', 'MultiPolygon', 'GeometryCollection'],
             required: true,
         },
         coordinates: {
@@ -20,10 +21,18 @@ const childCareSchema = new mongoose.Schema({
             required: true,
         },
     },
-});
+    version: Number,
+},
+    {
+        timestamps: true,
+    }
+);
+
+// Index on 'location' field
+childCareSchema.index({ location: '2dsphere' })
 
 // Model
-const ChildCare = mongoose.model('ChildCare', childCareSchema);
+const ChildCare = mongoose.model('child-care', childCareSchema);
 
 // Database Connection
 async function connectToDatabase() {
@@ -38,4 +47,7 @@ async function connectToDatabase() {
     }
 }
 
-export { ChildCare, connectToDatabase };
+export { 
+    connectToDatabase,
+    ChildCare,
+ };

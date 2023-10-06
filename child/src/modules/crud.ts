@@ -1,5 +1,6 @@
 import express from 'express';
 import bodyParser from 'body-parser';
+import mongoose from 'mongoose';
 import { ChildCare, connectToDatabase } from './dbConnect';
 
 const app = express();
@@ -12,9 +13,15 @@ app.use(bodyParser.json());
 
 // CREATE
 app.post('/childcare', async (req, res) => {
-    const childcareData = req.body;
-    const newChildCare = await ChildCare.create(childcareData);
-    res.status(201).json(newChildCare);
+    try {
+        const childcareData = req.body;
+        const newChildCare = await ChildCare.create(childcareData);
+        res.status(201).json(newChildCare);
+    } catch (error) {
+        console.error('Error creating childcare', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+    
 });
 
 // READ
@@ -54,7 +61,11 @@ app.delete('/childcare/:id', async (req, res) => {
     }
 });
 
-
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
+})
+
+process.on('exit', () => {
+    console.log('DB Close');
+    mongoose.connection.close();
 })
