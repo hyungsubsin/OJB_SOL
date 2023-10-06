@@ -1,55 +1,50 @@
 import axios from 'axios';
-import cron from 'node-cron';
 import { ChildCare, connectToDatabase } from './dbConnect';
 import terraformer from 'terraformer-wkt-parser'
 import fs from 'fs';
 
-
-// Init
 const baseUrl = 'https://data-api.myfranchise.kr/v1';
 const headers = {
     accept: 'application/json',
 };
 
-// DB connect
-connectToDatabase();
-
-// Batch
-cron.schedule('0 3 * * *', async () => {
-    console.log('#################################');
-    console.log('###### Update Batch Start #######');
-    console.log('#################################');
-
-    await collectChildCareData();
-});
-
-
-
-
-
-// 업데이트 시점 기준 최신버전
-let level: number = 0;
+// 업데이트 최신 버전 확인
+const latestVersion = async () => {
+    try {
+        const latestVersion = await ChildCare.findOne().sort({ version: -1 });
+        return latestVersion;
+    } catch (error) {
+        console.log('Error finding latest Version', error);
+        return null;
+    }
+    
+}
 
 // 어린이집 최근정보
-async function getLatestVersionId() {
-
-    const response = await axios.get(baseUrl + '/school/childcare/latest/', {
-        headers,
-    });
-    const latestVersionId = response.data.id;
-
-    return latestVersionId;
-};
+const getLatestVersionId = async () => {
+    try {
+        const response = await axios.get(baseUrl + '/school/childcare/latest/', {
+            headers,
+        });
+        const latestVersionId = response.data.id;
+    
+        return latestVersionId;    
+    } catch (error) {
+        console.error('Error finding latest version ID', error);
+        return null;
+    }
+}
 
 // 어린이집 데이터 수집
-async function collectChildCareData() {
-
+const collectChildCareData = async () => {
     const latestVersionId = await getLatestVersionId();
-    const existingData = await ChildCare.find({});
+    const existingDataCnt = await ChildCare.countDocuments();
     let nextVersion: any;
 
+
+    const latetVersion = await latestVersion();
     try {
-        nextVersion = await axios.get(baseUrl + '/school/childcare/' + level + '/next/', {
+        nextVersion = await axios.get(baseUrl + '/school/childcare/' + latetVersion + '/next/', {
             headers,
         });
     } catch (error: any) {
@@ -58,18 +53,17 @@ async function collectChildCareData() {
         }
     }
 
-    if (existingData.length === 0) {
+    if (existingDataCnt == 0) {
         await collectChildCareVersions(1, latestVersionId);
     } else if (nextVersion && nextVersion.status === 200) {
-        await collectChildCareVersions(level + 1, latestVersionId);
+        await collectChildCareVersions(nextVersion.data.id + 1, latestVersionId);
     } else {
         console.log('No Data to Update');
     }
+}
 
-};
 
-
-async function collectChildCareVersions(startVersion: number, endVersion: number) {
+const collectChildCareVersions = async (startVersion: number, endVersion: number) => {
     for (let version_pk = startVersion; version_pk <= endVersion; version_pk++) {
         try {
             const response = await axios.get(baseUrl + '/school/childcare/' + version_pk + '/', {
@@ -77,7 +71,7 @@ async function collectChildCareVersions(startVersion: number, endVersion: number
             });
             const childcareDataArr = response.data.results;
 
-            for (const childcareData of childcareDataArr) {
+            for await (const childcareData of childcareDataArr) {
                 const lng: number = parseFloat(childcareData.lng);
                 const lat: number = parseFloat(childcareData.lat);
 
@@ -89,29 +83,29 @@ async function collectChildCareVersions(startVersion: number, endVersion: number
                 delete childcareData.lng;
                 delete childcareData.lat;
                 childcareData.location = location;
+                childcareData.version = version_pk;
 
                 await ChildCare.create(childcareData);
             }
 
             console.log('Saved childcare data for version : ' + version_pk);
-            level = version_pk;
         } catch (error) {
             console.error('Error collecting and saving childcare data for version : ' + version_pk, error);
         }
     }
-};
+}
 
 
 
 // 서울시에 있는 모든 어린이집 수 구하기
-async function childCareInSeoul() {
-    const childCareInSeoulCnt = await ChildCare.countDocuments({ address: { $regex: /서울/ }, });
+const childCareInSeoul = async () => {
+    const childCareInSeoulCnt = await ChildCare.countDocuments({ address: /^서울특별시/ });
     console.log('서울시에 있는 어린이집 수 : ' + childCareInSeoulCnt);
     return childCareInSeoulCnt;
-};
+}
 
 // 반경 5km 이내 어린이집 구하기
-async function childCareNearby() {
+const childCareNearby = async () => {
     const lng: number = 127.0393541;
     const lat: number = 37.5084279;
 
@@ -125,13 +119,13 @@ async function childCareNearby() {
 
     const resultList = nearbyArr.map(item => item.name);
     console.log('◼︎◼︎◼︎◼︎◼︎◼︎◼︎◼︎◼︎ 5km 이내 어린이집 데이터 ◼︎◼︎◼︎◼︎◼︎◼︎◼︎◼︎◼︎ \n\n' + resultList.join('\n'));
-};
+}
 
 // 멀티폴리곤
-async function multiPolygon() {
-    const filePaths = ['./multiPolygon.wkt', './multiPolygon2.wkt']
+const multiPolygon = async () => {
+    const filePaths = ['../utils/multiPolygon.wkt', '../utils/multiPolygon2.wkt']
 
-    for (const filePath of filePaths) {
+    for await(const filePath of filePaths) {
         fs.readFile(filePath, 'utf8', (err, data) => {
             const jsonData = data;
             const geoJson = terraformer.parse(jsonData);
@@ -140,7 +134,7 @@ async function multiPolygon() {
     }
 }
 
-async function getChildCareWithinPolygon(polygonData: any) {
+const getChildCareWithinPolygon = async (polygonData: any) => {
     const childCareData = await ChildCare.find({
         location: {
             $geoWithin: {
@@ -150,4 +144,11 @@ async function getChildCareWithinPolygon(polygonData: any) {
     }).exec();
     console.log(childCareData);
     return childCareData;
+}
+
+export {
+    collectChildCareData,
+    childCareInSeoul,
+    childCareNearby,
+    multiPolygon,
 }
